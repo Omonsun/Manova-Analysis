@@ -1,0 +1,170 @@
+---
+title: "Manova analysis"
+author: "omon das"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: hpstr
+    toc: yes
+editor_options: 
+  markdown: 
+    wrap: 72
+  
+---
+
+**What is MANOVA**
+
+MANOVA is an extension of univariate ANOVA that includes at least two dependent variables to analyze differences between multiple groups in the independent variable. In contrast to ANOVA, where we compare individual group means, MANOVA compares the vectors containing the group means of each dependent variable. MANOVA uses omnibus Wilk’s Lambda, Pillai’s Trace (most robust to departures from assumptions), Roy’s Largest Root, or Hotelling-Lawley’s test, which are later converted to F statistics for assessing the significance of the group differences. Pillai’s Trace has the highest statistical power.
+
+$\textbf{Why Manova is so useful?}$
+
+- MANOVA analyzes the differences among groups in an independent variable by considering multiple dependent variables. This reduces the type I error which can be inflated by performing separate univariate ANOVA for each dependent variable.
+- As compared to univariate ANOVA, MANOVA uses more information from the dependent variables i.e., MANOVA may find differences between groups based on combined information from the multiple dependent variables.
+
+
+**Hypothesis of Manova**
+$H_0:$ group mean vectors are same for all groups
+
+**Load the datasets**
+
+$Dataset-Description:$
+
+Suppose we have a dataset of various plant varieties (plant_var) and their associated phenotypic measurements for plant heights (height) and canopy volume (canopy_vol). We want to see if plant heights and canopy volume are associated with different plant varieties using MANOVA.
+
+```{r}
+
+library(tidyverse)
+df=read_csv("https://reneshbedre.github.io/assets/posts/ancova/manova_data.csv")
+head(df, 2)
+```
+
+```{r}
+df %>% 
+  group_by(plant_var) %>% 
+  summarise(n=n(), mean_height= mean(height), height_sd= sd(height) )
+
+```
+
+```{r}
+df %>% 
+  group_by(plant_var) %>% 
+  summarise(n=n(), mean_vol= mean(canopy_vol), vol_sd= sd(canopy_vol) )
+```
+
+```{r}
+
+library(gridExtra)
+p1 <- ggplot(df, aes(x = plant_var, y = height, fill = plant_var)) + geom_boxplot(outlier.shape = NA) + geom_jitter(width = 0.2) + theme(legend.position="top")
+p2 <- ggplot(df, aes(x = plant_var, y = canopy_vol, fill = plant_var)) + geom_boxplot(outlier.shape = NA) + geom_jitter(width = 0.2) + theme(legend.position="top")
+plot=grid.arrange(p1, p2, ncol=2)
+
+ggsave(
+  filename = "D:\\manova presentation\\mean_df_diff.png", 
+  plot = plot,                # If left out, it saves the last plot displayed
+  width = 8,                     # Width of the output image
+  height = 6,                    # Height of the output image
+  units = "in",                  # Units for width/height ("in", "cm", or "mm")
+  dpi = 300                      # Set resolution to 300 DPI
+)
+
+```
+
+**Perform One- way Manova**
+
+```{r}
+dep_var= cbind(df$height, df$canopy_vol)
+
+manova_fit= manova( dep_var~ plant_var, data=df)
+```
+
+
+```{r}
+summary(manova_fit)
+#print("For Wilk lambda test statistics")
+#summary(manova_fit, test = "Wilks")
+
+```
+The Pillai’s Trace test statistics is statistically significant [Pillai’s Trace = 1.03, p < 0.001].
+Because the probability of accepting null hypothesis is lower then the significant threshold.
+Which mean group mean vectors for the plants are not same for all groups. 
+
+
+
+```{r}
+library(effectsize)
+effectsize::eta_squared(manova_fit)
+```
+
+The measure of effect size (Partial Eta Squared; ηp2) is 0.52 and suggests that there is a large effect of plant varieties on both plant height and canopy volume.
+
+
+**Post Hoc test**
+
+Manova only shows statistically significance. To actually show the difference between groups while retaining the dependent variable information LDA is popularly used in many scientific methodology.
+
+we will perform the linear discriminant analysis (LDA) to see the differences between each group. LDA will discriminate the groups using information from both the dependent variables.
+```{r}
+library(MASS)
+
+post_hoc <- lda(df$plant_var ~ dep_var, CV=F)
+plot_lda <- data.frame(df[, "plant_var"], lda = predict(post_hoc)$x)
+ggplot(plot_lda) + geom_point(aes(x = lda.LD1, y = lda.LD2, colour = plant_var), size = 4)
+```
+The LDA scatter plot discriminates against multiple plant varieties based on the two dependent variables. The C and D plant variety has a significant difference (well separated) as compared to A and B. A and B plant varieties are more similar to each other. Overall, LDA discriminated between multiple plant varieties.
+
+ **Assumption of Manova**
+
+- Multivariate Normality: Data or residuals within each group combination must follow a joint normal distribution, evaluated via Shapiro-Wilk (univariate) and Mardia’s (multivariate) tests
+
+- Homogeneity of Variance-Covariance Matrices: Variance-covariance matrix structures must be equal across all independent grouping cells, typically evaluated using Box’s M test at a strict $alpha = 0.001$ threshold.
+
+-Multicollinearity: Dependent variables should be moderately correlated but free of severe multicollinearity.
+
+-Linearity: All pairs of dependent variables must share a distinct, straight-line relationship within each cell of the independent factor groupings
+
+- No Outliers: The dataset must contain no multivariate outliers among the combined outcomes, traditionally flagged using Mahalanobis distance thresholds matched against a chi-square distribution.
+
+- Continuous Dependent Variables: Every measured dependent variable must be recorded on a continuous scale, such as interval or ratio metrics.
+
+**Assumptions of multivariate normality**
+
+In univariate test, we can use shaprio wilk test. But in Multivariate analysis we use Mardia’s Skewness and Kurtosis test. If this test does not pass, it may be possible that multivariate normality is violated.
+```{r}
+#H0: the dependent variables are MVN across all groups.
+
+library(mvnormalTest)
+mardia(df[, c("height", "canopy_vol")])$mv.test
+
+```
+As, p>0.05, we may not reject null hypothesis. And we can follows joint normal distribution.
+
+
+**Homogeneity of the variance-covariance matrices**
+
+$H_0$: variance-covariance matrices are equal for each combination formed by each group in the independent variable
+
+```{r}
+library(heplots)
+boxM(Y = df[, c("height", "canopy_vol")], group = df$plant_var)
+
+```
+As the p-value is non-significant (p > 0.001) for Box’s M test, we fail to reject the null hypothesis and conclude that variance-covariance matrices are equal for each combination of the dependent variable formed by each group in the independent variable.
+
+**Linearity assumption**
+```{r}
+library(gridExtra)
+p1 <- df  %>% group_by(plant_var) %>% filter(plant_var == "A") %>% ggplot(aes(x = height, y = canopy_vol)) + geom_point() + ggtitle("Variety: A")
+p2 <- df  %>% group_by(plant_var) %>% filter(plant_var == "B") %>% ggplot(aes(x = height, y = canopy_vol)) + geom_point() + ggtitle("Variety: B") 
+p3 <- df  %>% group_by(plant_var) %>% filter(plant_var == "C") %>% ggplot(aes(x = height, y = canopy_vol)) + geom_point() + ggtitle("Variety: C") 
+p4 <- df  %>% group_by(plant_var) %>% filter(plant_var == "D") %>% ggplot(aes(x = height, y = canopy_vol)) + geom_point() + ggtitle("Variety: D") 
+grid.arrange(p1, p2, p3, p4, ncol=2)
+
+```
+**Multicollinearity assumption**
+
+```{r}
+cor.test(x = df$height, y = df$canopy_vol, method = "pearson")$estimate
+
+
+```
+As the correlation coefficient between the dependent variable is < 0.9, there is no multicollinearity.
